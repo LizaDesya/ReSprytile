@@ -14,68 +14,62 @@ from sprytile_tools.tool_build import ToolBuild
 from sprytile_tools.tool_paint import ToolPaint
 
 import sprytile_preview
-import bgl
-# Shaders
-flat_vertex_shader = '''
-    uniform mat4 u_modelViewProjectionMatrix;
+# Shaders (GPUShader(vert, frag) was removed in Blender 5.0, so build from create info)
+flat_interface = gpu.types.GPUStageInterfaceInfo("sprytile_flat_interface")
+flat_interface.smooth('VEC4', "o_color")
 
-    in vec2 i_position;
-    in vec4 i_color;
-
-    out vec4 o_color;
-
+flat_shader_info = gpu.types.GPUShaderCreateInfo()
+flat_shader_info.push_constant('MAT4', "u_modelViewProjectionMatrix")
+flat_shader_info.vertex_in(0, 'VEC2', "i_position")
+flat_shader_info.vertex_in(1, 'VEC4', "i_color")
+flat_shader_info.vertex_out(flat_interface)
+flat_shader_info.fragment_out(0, 'VEC4', "frag_color")
+flat_shader_info.vertex_source('''
     void main()
     {
         o_color = i_color;
         gl_Position = u_modelViewProjectionMatrix * vec4(i_position, 0.0, 1.0);
     }
-'''
-
-flat_fragment_shader = '''
-    in vec4 o_color;
-    out vec4 frag_color;
-
+''')
+flat_shader_info.fragment_source('''
     void main()
     {
         frag_color = o_color;
     }
-'''
+''')
 
-image_vertex_shader = '''
-    uniform mat4 u_modelViewProjectionMatrix;
+image_interface = gpu.types.GPUStageInterfaceInfo("sprytile_image_interface")
+image_interface.smooth('VEC2', "o_uv")
+image_interface.smooth('VEC4', "o_color")
 
-    in vec2 i_position;
-    in vec4 i_color;
-    in vec2 i_uv;
-
-    out vec2 o_uv;
-    out vec4 o_color;
-
+image_shader_info = gpu.types.GPUShaderCreateInfo()
+image_shader_info.push_constant('MAT4', "u_modelViewProjectionMatrix")
+image_shader_info.push_constant('FLOAT', "u_correct")
+image_shader_info.sampler(0, 'FLOAT_2D', "u_image")
+image_shader_info.vertex_in(0, 'VEC2', "i_position")
+image_shader_info.vertex_in(1, 'VEC4', "i_color")
+image_shader_info.vertex_in(2, 'VEC2', "i_uv")
+image_shader_info.vertex_out(image_interface)
+image_shader_info.fragment_out(0, 'VEC4', "frag_color")
+image_shader_info.vertex_source('''
     void main()
     {
         o_uv = i_uv;
         o_color = i_color;
         gl_Position = u_modelViewProjectionMatrix * vec4(i_position, 0.0, 1.0);
     }
-'''
-
-image_fragment_shader = '''
-    uniform sampler2D u_image;
-    uniform float u_correct;
-
-    in vec2 o_uv;
-    in vec4 o_color;
-    out vec4 frag_color;
-
+''')
+image_shader_info.fragment_source('''
     void main()
     {
         vec4 col = texture(u_image, o_uv) * o_color;
         frag_color = pow(col, vec4(u_correct));
     }
-'''
+''')
 
-flat_shader = gpu.types.GPUShader(flat_vertex_shader, flat_fragment_shader)
-image_shader = gpu.types.GPUShader(image_vertex_shader, image_fragment_shader)
+flat_shader = gpu.shader.create_from_info(flat_shader_info)
+image_shader = gpu.shader.create_from_info(image_shader_info)
+del flat_shader_info, flat_interface, image_shader_info, image_interface
 
 
 
@@ -1001,11 +995,11 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         #bgl.glBindTexture(bgl.GL_TEXTURE_2D, VIEW3D_OP_SprytileGui.texture)
 
         # Backup texture settings
-        old_mag_filter = bgl.Buffer(bgl.GL_INT, 1)
+        #old_mag_filter = bgl.Buffer(bgl.GL_INT, 1)
         #bgl.glGetTexParameteriv(bgl.GL_TEXTURE_2D, bgl.GL_TEXTURE_MAG_FILTER, old_mag_filter)
 
-        old_wrap_S = bgl.Buffer(bgl.GL_INT, 1)
-        old_wrap_T = bgl.Buffer(bgl.GL_INT, 1)
+        #old_wrap_S = bgl.Buffer(bgl.GL_INT, 1)
+        #old_wrap_T = bgl.Buffer(bgl.GL_INT, 1)
 
         #bgl.glGetTexParameteriv(bgl.GL_TEXTURE_2D, bgl.GL_TEXTURE_WRAP_S, old_wrap_S)
         #bgl.glGetTexParameteriv(bgl.GL_TEXTURE_2D, bgl.GL_TEXTURE_WRAP_T, old_wrap_T)

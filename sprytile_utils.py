@@ -1,5 +1,4 @@
 import bpy
-import bgl
 import blf
 import bmesh
 import math
@@ -1394,7 +1393,7 @@ class UTIL_OP_SprytileGridTranslate(bpy.types.Operator):
 
         font_id = 0
         font_size = 16
-        blf.size(font_id, font_size, 72)
+        blf.size(font_id, font_size)
 
         readout_axis = ['X', 'Y', 'Z']
         for i in range(3):

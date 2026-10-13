@@ -16,7 +16,12 @@ from datetime import datetime
 from os import path
 import sprytile_modal
 import sprytile_preview
-import addon_updater_ops
+# This module is also imported as a top level module through sys.path, where the
+# updater (which needs its package for relative imports) can't be loaded
+try:
+    from . import addon_updater_ops
+except ImportError:
+    addon_updater_ops = None
 
 
 def get_build_vertices(position, x_vector, y_vector, up_vector, right_vector):
@@ -860,7 +865,11 @@ class UTIL_OP_SprytileSetupMaterial(bpy.types.Operator):
 
         # Make material equivalent to a shadeless transparent one in Blender 2.7 
         mat.use_nodes = True
-        mat.blend_method = 'CLIP'
+        # EEVEE Next (4.2+) replaced blend_method 'CLIP' with the dithered render method
+        if hasattr(mat, "surface_render_method"):
+            mat.surface_render_method = 'DITHERED'
+        else:
+            mat.blend_method = 'CLIP'
 
         # Get the material texture (if any) so we can keep it
         mat_texture = get_material_texture(mat)
@@ -1321,12 +1330,10 @@ class UTIL_OP_SprytileMakeDoubleSided(bpy.types.Operator):
     bl_description = "Duplicate selected faces and flip normals"
 
     def execute(self, context):
-        self.invoke(context, None)
+        return self.invoke(context, None)
 
     def invoke(self, context, event):
-        print("Invoked make double sided")
         if context.object is None or (context.object.type != 'MESH' or context.object.mode != 'EDIT'):
-            print("Nope")
             return {'FINISHED'}
         mesh = bmesh.from_edit_mesh(context.object.data)
         double_face = []
@@ -1341,7 +1348,7 @@ class UTIL_OP_SprytileMakeDoubleSided(bpy.types.Operator):
 
         mesh.faces.index_update()
         mesh.faces.ensure_lookup_table()
-        bmesh.update_edit_mesh(context.object.data, True, True)
+        bmesh.update_edit_mesh(context.object.data, loop_triangles=True, destructive=True)
         return {'FINISHED'}
 
 
@@ -2037,7 +2044,8 @@ class VIEW3D_PT_SprytileWorkflowPanel(bpy.types.Panel):
             return context.object.mode == 'EDIT'
 
     def draw(self, context):
-        addon_updater_ops.check_for_update_background()
+        if addon_updater_ops is not None:
+            addon_updater_ops.check_for_update_background()
 
         layout = self.layout
 

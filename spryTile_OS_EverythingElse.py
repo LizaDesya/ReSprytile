@@ -2,14 +2,12 @@ import bpy
 import gpu
 import blf
 import bmesh
-import array
 from bpy_extras import view3d_utils
 from math import floor, ceil, copysign
 from bpy.props import *
 from mathutils import Vector, Matrix
 import sprytile_utils, sprytile_modal
 from gpu_extras.batch import batch_for_shader
-from gpu_extras.presets import draw_texture_2d
 from sprytile_tools.tool_build import ToolBuild
 from sprytile_tools.tool_paint import ToolPaint
 
@@ -59,10 +57,13 @@ image_shader_info.vertex_source('''
         gl_Position = u_modelViewProjectionMatrix * vec4(i_position, 0.0, 1.0);
     }
 ''')
+# texelFetch gives nearest-neighbour sampling, since sampler filtering can't be set from Python
 image_shader_info.fragment_source('''
     void main()
     {
-        vec4 col = texture(u_image, o_uv) * o_color;
+        ivec2 size = textureSize(u_image, 0);
+        ivec2 texel = clamp(ivec2(floor(o_uv * vec2(size))), ivec2(0), size - 1);
+        vec4 col = texelFetch(u_image, texel, 0) * o_color;
         frag_color = pow(col, vec4(u_correct));
     }
 ''')
@@ -102,6 +103,10 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
     is_running = False
     tile_ui_active = False
     out_of_region = False
+    current_grid = None
+    loaded_grid = None
+    draw_callback = None
+    offscreen = None
 
     build_previews = {
         'MAKE_FACE' : ToolBuild,
@@ -230,12 +235,9 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             context.area.tag_redraw()
 
     def set_zoom_level(self, context, zoom_shift):
-        MAX_ZOOM_LEVEL = 1.0 #hack: Define maximum zoom
         region = context.region
         zoom_level = context.scene.sprytile_ui.zoom
         zoom_level = self.calc_zoom(region, zoom_level, zoom_shift)
-
-        zoom_level = min(zoom_level, MAX_ZOOM_LEVEL) #hack: Limit Zoom
 
         display_size = VIEW3D_OP_SprytileGui.display_size
 
@@ -245,13 +247,9 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             zoom_level = self.calc_zoom(region, zoom_level, 1)
             calc_size = round(display_size[0] * zoom_level), round(display_size[1] * zoom_level)
 
-            zoom_level = min(zoom_level, MAX_ZOOM_LEVEL) #hack: Limit Zoom
-
-        while calc_size[0] > region.width*3 or calc_size[1] > region.height*3:
+        while zoom_level > 0.01 and (calc_size[0] > region.width or calc_size[1] > region.height):
             zoom_level = self.calc_zoom(region, zoom_level, -1)
             calc_size = round(display_size[0] * zoom_level), round(display_size[1] * zoom_level)
-
-            zoom_level = min(zoom_level, MAX_ZOOM_LEVEL) #hack: Limit Zoom
 
         # Before setting new zoom, calculate palette position
         display_offset, display_size, size_half, display_min, display_max = self.calc_palette_pos(context)
@@ -338,8 +336,11 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
 
         size_half = Vector((int(display_size[0]/2), int(display_size[1]/2)))
 
-        display_min = Vector((display_pad_y/3 + size_half.x/3, display_pad_y/3 + size_half.y/3))
-        display_max = Vector((context.region.width*3 - display_pad_x*3 - size_half.x*3, context.region.height*3 - display_pad_y*3 - size_half.y*3))
+        # Keep the whole palette inside the region; if it is bigger than the region, pin it to the bottom left
+        display_min = Vector((display_pad_y + size_half.x, display_pad_y + size_half.y))
+        display_max = Vector((context.region.width - display_pad_x - size_half.x, context.region.height - display_pad_y - size_half.y))
+        display_max.x = max(display_max.x, display_min.x)
+        display_max.y = max(display_max.y, display_min.y)
 
         display_offset = Vector((context.scene.sprytile_ui.palette_pos[0], context.scene.sprytile_ui.palette_pos[1]))
 
@@ -361,6 +362,8 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         ret_val = 'RUNNING_MODAL'
 
         tilegrid = sprytile_utils.get_grid(context, obj.sprytile_gridid)
+        if tilegrid is None:
+            return 'PASS_THROUGH'
         tex_size = VIEW3D_OP_SprytileGui.tex_size
         
         display_offset, display_size, size_half, display_min, display_max = self.calc_palette_pos(context)
@@ -409,7 +412,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             ratio_pos = Vector((click_pos.x / display_size[0], click_pos.y / display_size[1]))
             tex_pos = Vector((ratio_pos.x * tex_size[0], ratio_pos.y * tex_size[1], 0))
             # Apply grid matrix to tex_pos
-            grid_matrix = sprytile_utils.get_grid_matrix(VIEW3D_OP_SprytileGui.loaded_grid)
+            grid_matrix = sprytile_utils.get_grid_matrix(tilegrid)
             tex_pos = grid_matrix.inverted() @ tex_pos
 
             grid_max = Vector((ceil(tex_size[0]/tilegrid.grid[0])-1, ceil(tex_size[1]/tilegrid.grid[1])-1))
@@ -512,9 +515,12 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
     # ==================
     @staticmethod
     def setup_offscreen(self, context):
+        old_offscreen = getattr(VIEW3D_OP_SprytileGui, "offscreen", None)
+        if old_offscreen is not None:
+            old_offscreen.free()
         VIEW3D_OP_SprytileGui.offscreen = VIEW3D_OP_SprytileGui.setup_gpu_offscreen(self, context)
         if VIEW3D_OP_SprytileGui.offscreen:
-            VIEW3D_OP_SprytileGui.texture = VIEW3D_OP_SprytileGui.offscreen.color_texture
+            VIEW3D_OP_SprytileGui.texture = VIEW3D_OP_SprytileGui.offscreen.texture_color
         else:
             self.report({'ERROR'}, "Error initializing offscreen buffer. More details in the console")
             return {'CANCELLED'}
@@ -525,11 +531,13 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         obj = context.object
 
         sprytile_list = context.scene.sprytile_list
-        grid_id = sprytile_list.display[sprytile_list.idx].grid_id
-
-        # set current object grid_id to selected grid_id
-        if grid_id != obj.sprytile_gridid:
-            obj.sprytile_gridid = grid_id
+        grid_id = obj.sprytile_gridid
+        if 0 <= sprytile_list.idx < len(sprytile_list.display):
+            list_grid_id = sprytile_list.display[sprytile_list.idx].grid_id
+            # set current object grid_id to selected grid_id
+            if list_grid_id != -1 and list_grid_id != grid_id:
+                grid_id = list_grid_id
+                obj.sprytile_gridid = grid_id
 
         # Get the current tile grid, to fetch the texture size to render to
         tilegrid = sprytile_utils.get_grid(context, grid_id)
@@ -555,7 +563,6 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         VIEW3D_OP_SprytileGui.tex_size = tex_size
         VIEW3D_OP_SprytileGui.display_size = tex_size
         VIEW3D_OP_SprytileGui.current_grid = grid_id
-        VIEW3D_OP_SprytileGui.loaded_grid = tilegrid
         self.get_zoom_level(context)
         return offscreen
 
@@ -582,24 +589,33 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         if not VIEW3D_OP_SprytileGui.is_running:
             return
 
+        context = bpy.context
         sprytile_data = context.scene.sprytile_data
         show_extra = sprytile_data.show_extra or sprytile_data.show_overlay
         tilegrid = sprytile_utils.get_selected_grid(context)
 
+        # Grid PropertyGroups are re-allocated when the grid collection changes, so a
+        # reference kept between redraws can dangle and crash Blender. Look it up every draw.
+        VIEW3D_OP_SprytileGui.loaded_grid = sprytile_utils.get_grid(context, VIEW3D_OP_SprytileGui.current_grid)
+
         if tilegrid is None or VIEW3D_OP_SprytileGui.loaded_grid is None or VIEW3D_OP_SprytileGui.texture_grid is None or bpy.data.images.find(VIEW3D_OP_SprytileGui.texture_grid) < 0:
+            VIEW3D_OP_SprytileGui.loaded_grid = None
             return
-        
+
         region = context.region
- 
+
         rv3d = context.region_data
 
         middle_btn = context.scene.sprytile_ui.middle_btn
 
-        VIEW3D_OP_SprytileGui.draw_offscreen(context)
-        VIEW3D_OP_SprytileGui.draw_to_viewport(self.gui_min, self.gui_max, show_extra,
-                                    self.label_counter, tilegrid, sprytile_data,
-                                    context.scene.cursor.location, region, rv3d,
-                                    middle_btn, context)
+        try:
+            VIEW3D_OP_SprytileGui.draw_offscreen(context)
+            VIEW3D_OP_SprytileGui.draw_to_viewport(self.gui_min, self.gui_max, show_extra,
+                                        self.label_counter, tilegrid, sprytile_data,
+                                        context.scene.cursor.location, region, rv3d,
+                                        middle_btn, context)
+        finally:
+            VIEW3D_OP_SprytileGui.loaded_grid = None
 
     @staticmethod
     def draw_selection(mvpMat, color, sel_min, sel_max, adjust=1):
@@ -628,7 +644,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         batch.draw(flat_shader)
 
     @staticmethod
-    def draw_full_tex_quad(pos, mvpMat, textureUnit, gammaCorrect = False, uvs = None, color = (1, 1, 1, 1)):
+    def draw_full_tex_quad(pos, mvpMat, texture, gammaCorrect = False, uvs = None, color = (1, 1, 1, 1)):
         image_shader.bind()
 
         vercol = (color,)*4
@@ -636,63 +652,44 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             uvs = ((0,0),(1,0),(0,1),(1,1))
         batch = batch_for_shader(image_shader, 'TRI_STRIP', { "i_position": pos, "i_color": vercol, "i_uv": uvs})
         image_shader.uniform_float("u_modelViewProjectionMatrix", mvpMat)
-        image_shader.uniform_int("u_image", textureUnit)
+        image_shader.uniform_sampler("u_image", texture)
         image_shader.uniform_float("u_correct", gammaCorrect and (1.0/2.2) or 1.0)
         batch.draw(image_shader)
+
+    @staticmethod
+    def get_tileset_texture():
+        img_idx = bpy.data.images.find(VIEW3D_OP_SprytileGui.texture_grid or "")
+        if img_idx < 0:
+            return None
+        return gpu.texture.from_image(bpy.data.images[img_idx])
 
     @staticmethod
     def draw_offscreen(context):
         """Draw the GUI into the offscreen texture"""
         offscreen = VIEW3D_OP_SprytileGui.offscreen
-        target_img = VIEW3D_OP_SprytileGui.texture_grid
         tex_size = VIEW3D_OP_SprytileGui.tex_size
-        x = 150
-        y = 150
         projection_mat = sprytile_utils.get_ortho2D_matrix(0, tex_size[0], 0, tex_size[1])
 
-        offscreen.bind()
-        fb = gpu.state.active_framebuffer_get() #bgl.glClearColor(0, 0, 0, 0.5)
-        fb.clear(color=(0.0, 0.0, 0.0, 0.0))    #bgl.glClear(bgl.GL_COLOR_BUFFER_BIT)
+        texture = VIEW3D_OP_SprytileGui.get_tileset_texture()
+        if offscreen is None or texture is None:
+            return
 
-        shader = gpu.shader.from_builtin('IMAGE')
-        batch = batch_for_shader(
-        shader, 'TRI_FAN',
-        {
-            "pos": ((x, y), (tex_size[0], y), (x, tex_size[1]), (tex_size[0], tex_size[1])),
-            "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1)),
-        },
-    )
+        with offscreen.bind():
+            VIEW3D_OP_SprytileGui.draw_offscreen_contents(context, texture, tex_size, projection_mat)
 
-        gpu.state.depth_test_set("NONE")         #bgl.glDisable(bgl.GL_DEPTH_TEST)
-        gpu.state.blend_set('ALPHA')            #bgl.glEnable(bgl.GL_BLEND)
+    @staticmethod
+    def draw_offscreen_contents(context, texture, tex_size, projection_mat):
+        fb = gpu.state.active_framebuffer_get()
+        fb.clear(color=(0.0, 0.0, 0.0, 0.0))
+        gpu.state.depth_test_set('NONE')
 
-        target_img = bpy.data.images[bpy.data.images.find(target_img)]
-        texture = gpu.texture.from_image(target_img)
-       
-        #target_img.gl_load()
-        #bgl.glActiveTexture(bgl.GL_TEXTURE0)
-        #bgl.glBindTexture(bgl.GL_TEXTURE_2D, target_img.bindcode)
-        shader.uniform_sampler("image", texture)
-        batch.draw(shader)
-
-        # We need to backup and restore the MAG_FILTER to avoid messing up the Blender viewport
-        #old_mag_filter = bgl.Buffer(bgl.GL_INT, 1)
-        #bgl.glGetTexParameteriv(bgl.GL_TEXTURE_2D, bgl.GL_TEXTURE_MAG_FILTER, old_mag_filter)
-        #bgl.glTexParameteri(bgl.GL_TEXTURE_2D, bgl.GL_TEXTURE_MAG_FILTER, bgl.GL_NEAREST)
-        #bgl.glEnable(bgl.GL_TEXTURE_2D)
-        quad_pos = ((x, y), (tex_size[0], y), (x, tex_size[1]), (tex_size[0], tex_size[1]))
-        
-        # Blender > 2.83 expects sRGB
-        gamma_correct = bpy.app.version < (2, 83, 0)
-        VIEW3D_OP_SprytileGui.draw_full_tex_quad(quad_pos, projection_mat, 0, gamma_correct)
-        #bgl.glTexParameteriv(bgl.GL_TEXTURE_2D, bgl.GL_TEXTURE_MAG_FILTER, old_mag_filter)
+        quad_pos = ((0, 0), (tex_size[0], 0), (0, tex_size[1]), (tex_size[0], tex_size[1]))
+        VIEW3D_OP_SprytileGui.draw_full_tex_quad(quad_pos, projection_mat, texture)
 
         # Translate the gl context by grid matrix
         grid_matrix = sprytile_utils.get_grid_matrix(VIEW3D_OP_SprytileGui.loaded_grid)
         matrix_vals = [(grid_matrix[i][0], grid_matrix[i][1], grid_matrix[i][2], grid_matrix[i][3]) for i in range(4)]
         mvp_mat = projection_mat @ Matrix(matrix_vals)
-
-        gpu.state.blend_set('NONE') #bgl.glDisable(bgl.GL_TEXTURE_2D)
 
         # Get data for drawing additional overlays
         grid_size = VIEW3D_OP_SprytileGui.loaded_grid.grid
@@ -746,8 +743,6 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
                 cursor_min, cursor_max = VIEW3D_OP_SprytileGui.get_sel_bounds(grid_size, padding, margin,
                                                                     int(cursor_pos.x), int(cursor_pos.y),)
                 VIEW3D_OP_SprytileGui.draw_selection(mvp_mat, (1.0, 0.0, 0.0, 1.0), cursor_min, cursor_max)
-
-        offscreen.unbind()
 
     @staticmethod
     def get_sel_bounds(grid_size, padding, margin, x, y, size_x=1, size_y=1):
@@ -859,7 +854,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         # Draw the texture quad
         quad_pos = ((view_min.x, view_min.y), (view_max.x, view_min.y),
             (view_min.x, view_max.y), (view_max.x, view_max.y))
-        VIEW3D_OP_SprytileGui.draw_full_tex_quad(quad_pos, mvp_mat, 0)
+        VIEW3D_OP_SprytileGui.draw_full_tex_quad(quad_pos, mvp_mat, VIEW3D_OP_SprytileGui.texture)
         
         # Translate the gl context by grid matrix
         scale_factor = (view_size[0] / tex_size[0], view_size[1] / tex_size[1])
@@ -925,6 +920,10 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         if VIEW3D_OP_SprytileGui.out_of_region:
             return
 
+        texture = VIEW3D_OP_SprytileGui.get_tileset_texture()
+        if texture is None:
+            return
+
         uv = sprytile_preview.preview_uvs
         world_verts = sprytile_preview.preview_verts
         is_quads = sprytile_preview.preview_is_quads
@@ -959,7 +958,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             vtxs.append((screen_verts[i][0], screen_verts[i][1]))
 
             if mod == 3 and is_quads:
-                VIEW3D_OP_SprytileGui.draw_full_tex_quad((vtxs[0], vtxs[3], vtxs[1], vtxs[2]), mvp_mat, 0, False, (uvs[0], uvs[3], uvs[1], uvs[2]), color)
+                VIEW3D_OP_SprytileGui.draw_full_tex_quad((vtxs[0], vtxs[3], vtxs[1], vtxs[2]), mvp_mat, texture, False, (uvs[0], uvs[3], uvs[1], uvs[2]), color)
                 uvs.clear()
                 vtxs.clear()
 
@@ -970,7 +969,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             vercol = (color,)*len(uvs)
             batch = batch_for_shader(image_shader, 'TRI_FAN', { "i_position": vtxs, "i_color": vercol, "i_uv": uvs})
             image_shader.uniform_float("u_modelViewProjectionMatrix", mvp_mat)
-            image_shader.uniform_int("u_image", 0)
+            image_shader.uniform_sampler("u_image", texture)
             image_shader.uniform_float("u_correct", 1.0)
             batch.draw(image_shader)
 
@@ -1004,10 +1003,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         #bgl.glGetTexParameteriv(bgl.GL_TEXTURE_2D, bgl.GL_TEXTURE_WRAP_S, old_wrap_S)
         #bgl.glGetTexParameteriv(bgl.GL_TEXTURE_2D, bgl.GL_TEXTURE_WRAP_T, old_wrap_T)
 
-        width, height = grid_size
-        pixels = width * height * array.array('f', [0.1, 0.2, 0.1, 1.0])
-        pixels = gpu.types.Buffer('FLOAT', width * height * 4, pixels)
-        texture = gpu.types.GPUTexture((width, height), format='RGBA16F', data=pixels)
+        gpu.state.blend_set('ALPHA')
 
         # Set texture filter
         #bgl.glTexParameteri(bgl.GL_TEXTURE_2D, bgl.GL_TEXTURE_MAG_FILTER, bgl.GL_NEAREST)
@@ -1135,6 +1131,12 @@ def register():
 
 
 def unregister():
+    # A palette left running would keep drawing with freed data after the add-on is disabled
+    VIEW3D_OP_SprytileGui.is_running = False
+    VIEW3D_OP_SprytileGui.handler_remove(None, None)
+    if VIEW3D_OP_SprytileGui.offscreen is not None:
+        VIEW3D_OP_SprytileGui.offscreen.free()
+        VIEW3D_OP_SprytileGui.offscreen = None
     for c in classes:
         bpy.utils.unregister_class(c)
 

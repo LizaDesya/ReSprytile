@@ -13,6 +13,12 @@ by calling the real code with synthetic rays. The event plumbing around it was n
   wheel to zoom, Ctrl + wheel / RMB to cycle grids.
 - macOS (Metal) and Linux: only Windows + Vulkan was tested.
 
+**Answers**
+- "Setup pixel texture" utility gives a traceback
+- im not sure how to move my viewport when using the draw tool, other than the zoom tool
+- fill works ,so do the other tols
+- I only care about windows
+
 ## Packaging
 - Add a `blender_manifest.toml` so ReSprytile installs as a Blender Extension. Installing the release zip
   through Preferences > Get Extensions failed during testing; the legacy add-on path still works.

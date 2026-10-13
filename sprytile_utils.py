@@ -1342,7 +1342,7 @@ class UTIL_OP_SprytileMakeDoubleSided(bpy.types.Operator):
                 continue
             double_face.append(face)
         for face in double_face:
-            face.copy(True, True)
+            face.copy(verts=True, edges=True)
             face.normal_flip()
             face.normal_update()
 

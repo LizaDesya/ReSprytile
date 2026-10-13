@@ -798,6 +798,9 @@ class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
         return self.invoke(context, None)
 
     def invoke(self, context, event):
+        if event is None:
+            self.report({'WARNING'}, "Sprytile paint needs to be invoked from the 3D view")
+            return {'CANCELLED'}
         if context.space_data.type != 'VIEW_3D':
             self.report({'WARNING'}, "Active space must be a View3d: {0}".format(context.space_data.type))
             return {'CANCELLED'}
@@ -831,6 +834,9 @@ class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
         VIEW3D_OP_SprytileModalTool.no_undo = False
         self.update_bmesh_tree(context)
         self.refresh_mesh = False
+        # The first modal() call can exit straight away, which reads these
+        self.draw_preview = False
+        self.rx_data = None
 
         # Setup Rx Observer and Observables
         self.rx_observer = None

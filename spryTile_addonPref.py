@@ -28,7 +28,7 @@ class SprytileAddonPreferences(bpy.types.AddonPreferences):
     default_pixel_density: bpy.props.IntProperty(
         name="Pixel Density",
         description="How many pixels are displayed in one world unit",
-        default=32,
+        default=48,
         min=8
     )
 
@@ -38,7 +38,7 @@ class SprytileAddonPreferences(bpy.types.AddonPreferences):
         min=1,
         size=2,
         subtype='XYZ',
-        default=(32, 32)
+        default=(48, 48)
     )
 
     default_pad_offset: bpy.props.FloatProperty(

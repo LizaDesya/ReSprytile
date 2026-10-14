@@ -862,6 +862,9 @@ class UTIL_OP_SprytileSetupMaterial(bpy.types.Operator):
             return {'FINISHED'}
 
         mat = obj.material_slots[obj.active_material_index].material
+        if mat is None:
+            mat = bpy.data.materials.new(name="Material")
+            obj.material_slots[obj.active_material_index].material = mat
 
         # Make material equivalent to a shadeless transparent one in Blender 2.7 
         mat.use_nodes = True
@@ -884,25 +887,31 @@ class UTIL_OP_SprytileSetupMaterial(bpy.types.Operator):
         mix_cam_ray_n = nodes.new(type = 'ShaderNodeMixShader')
         mix_alpha_n = nodes.new(type = 'ShaderNodeMixShader')
         texture_n = nodes.new(type = 'ShaderNodeTexImage')
+        # The glTF exporter reads this clip as alphaMode MASK
+        clip_n = nodes.new(type = 'ShaderNodeMath')
+        clip_n.operation = 'GREATER_THAN'
+        clip_n.inputs[1].default_value = 0.5
 
-        # link
+        # link: the glTF exporter reads this order as unlit
         links = mat.node_tree.links
         links.new(texture_n.outputs['Color'], emission_n.inputs['Color'])
-        links.new(texture_n.outputs['Alpha'], mix_alpha_n.inputs['Fac'])
+        links.new(texture_n.outputs['Alpha'], clip_n.inputs[0])
+        links.new(clip_n.outputs['Value'], mix_alpha_n.inputs['Fac'])
         links.new(transparent_n.outputs['BSDF'], mix_alpha_n.inputs[1])
         links.new(transparent_n.outputs['BSDF'], mix_cam_ray_n.inputs[1])
-        links.new(emission_n.outputs['Emission'], mix_alpha_n.inputs[2])
-        links.new(mix_alpha_n.outputs['Shader'], mix_cam_ray_n.inputs[2])
+        links.new(emission_n.outputs['Emission'], mix_cam_ray_n.inputs[2])
+        links.new(mix_cam_ray_n.outputs['Shader'], mix_alpha_n.inputs[2])
         links.new(light_path_n.outputs['Is Camera Ray'], mix_cam_ray_n.inputs['Fac'])
-        links.new(mix_cam_ray_n.outputs['Shader'], output_n.inputs['Surface'])
+        links.new(mix_alpha_n.outputs['Shader'], output_n.inputs['Surface'])
 
         # reorder
         output_n.location = (400, 0)
-        mix_cam_ray_n.location = (200, 0)
-        light_path_n.location = (0, 250)
-        mix_alpha_n.location = (0, -100)
+        mix_alpha_n.location = (200, 0)
+        light_path_n.location = (-200, 250)
+        mix_cam_ray_n.location = (0, -100)
         transparent_n.location = (-200, -100)
         emission_n.location = (-200, -200)
+        clip_n.location = (-200, 100)
         texture_n.location = (-500, 100)
 
         if mat_texture:
@@ -1012,6 +1021,11 @@ class UTIL_OP_SprytileSetupTexture(bpy.types.Operator):
     bl_label = "Setup Pixel Texture"
     bl_description = "Change texture settings for crunchy pixelart style"
 
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return obj is not None and obj.type == 'MESH' and obj.active_material is not None
+
     def execute(self, context):
         return self.invoke(context, None)
 
@@ -1023,9 +1037,11 @@ class UTIL_OP_SprytileSetupTexture(bpy.types.Operator):
     def setup_tex(context):
         """"""
         obj = context.object
-        if obj.type != 'MESH':
+        if obj is None or obj.type != 'MESH':
             return
-        material = obj.material_slots[obj.active_material_index].material
+        material = obj.active_material
+        if material is None:
+            return
 
         #target_texture = None
         #target_img = None

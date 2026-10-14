@@ -133,13 +133,10 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
                 break
 
     def get_layer(self):
-        keys = self.keys()
-        if "work_layer" not in keys:
-            self["work_layer"] = 1
-
+        # Do not write ID data here. Blender calls getters during draw.
         out_value = [False, False]
         index_value_lookup = 1, 2
-        set_idx = index_value_lookup.index(self["work_layer"])
+        set_idx = index_value_lookup.index(self.get("work_layer", 1))
         out_value[set_idx] = True
         return out_value
 
@@ -175,7 +172,7 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
         name="World Pixel Density",
         description="How many pixels are displayed in one world unit",
         subtype='PIXEL',
-        default=32,
+        default=48,
         min=8,
         max=2048
     )
@@ -485,13 +482,13 @@ class SprytileMaterialGridSettings(bpy.types.PropertyGroup):
         min=1,
         size=2,
         subtype='XYZ',
-        default=(32, 32)
+        default=(48, 48)
     )
 
     def set_padding(self, value):
         current_padding = self.get_padding()
         if "grid" not in self.keys():
-            self["grid"] = (32, 32)
+            self["grid"] = (48, 48)
         padding_delta = [ (value[0] - current_padding[0]) * 2, (value[1] - current_padding[1]) * 2]
         new_grid = [self["grid"][0] - padding_delta[0], self["grid"][1] - padding_delta[1]]
         if new_grid[0] < 1 or new_grid[1] < 1:

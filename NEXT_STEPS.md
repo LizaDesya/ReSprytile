@@ -11,13 +11,17 @@ by calling the real code with synthetic rays. The event plumbing around it was n
 - `G` pixel translate (Sprytile intercepts the translate key while a tool is active).
 - Palette: click/drag tile selection, Ctrl + drag to move it, Shift + MMB to move the palette,
   wheel to zoom, Ctrl + wheel / RMB to cycle grids.
-- macOS (Metal) and Linux: only Windows + Vulkan was tested.
 
 **Answers**
-- "Setup pixel texture" utility gives a traceback
-- im not sure how to move my viewport when using the draw tool, other than the zoom tool
+- "Setup pixel texture" utility gives a traceback. Fixed: the button is disabled when the object has no material.
+- im not sure how to move my viewport when using the draw tool, other than the zoom tool.
+  Use the usual Blender keys: MMB drag to orbit, Shift + MMB to pan, the wheel to zoom.
 - fill works ,so do the other tols
-- I only care about windows
+- I only care about windows.
+
+**Fixed after testing**
+- The Decal Layer toggle wrote scene data during draw. Blender 5 does not let you do this.
+- Shadeless materials exported to glTF as black. Now they export as unlit, with alphaMode MASK.
 
 ## Packaging
 - Add a `blender_manifest.toml` so ReSprytile installs as a Blender Extension. Installing the release zip

@@ -29,11 +29,12 @@ if "bpy" in locals_list:
     reload(sprytile_panel)
     reload(sprytile_utils)
     reload(sprytile_uv)
+    reload(sprytile_tilefolder)
     reload(tool_build)
     reload(tool_paint)
     reload(tool_fill)
 else:
-    from . import sprytile_gui, sprytile_modal, sprytile_panel, sprytile_utils, sprytile_uv, spryTile_addonPref
+    from . import sprytile_gui, sprytile_modal, sprytile_panel, sprytile_utils, sprytile_uv, sprytile_tilefolder, spryTile_addonPref
     from sprytile_tools import *
 
 import bpy
@@ -586,6 +587,18 @@ class SprytileMaterialData(bpy.types.PropertyGroup):
     )
     grids : CollectionProperty(type=SprytileMaterialGridSettings)
 
+    tile_dir : StringProperty(
+        name="Tile Folder",
+        description="Folder of tile images for this material's tileset",
+        subtype='DIR_PATH',
+        default=""
+    )
+    tile_slots : CollectionProperty(type=sprytile_tilefolder.SprytileTileSlot)
+    atlas_columns : IntProperty(default=8, min=1)
+    atlas_rows : IntProperty(default=0, min=0)
+    # Older folder atlases have none
+    atlas_padding : IntProperty(default=0, min=0)
+
 
 class SprytileGridDisplay(bpy.types.PropertyGroup):
     mat_id: bpy.props.StringProperty(default="")
@@ -846,6 +859,7 @@ def teardown_keymap():
 classes = (
         SprytileSceneSettings,
         SprytileMaterialGridSettings,
+        sprytile_tilefolder.SprytileTileSlot,
         SprytileMaterialData,
         SprytileGridDisplay,
         SprytileGridList,
@@ -862,6 +876,7 @@ submodules = (
     sprytile_panel,
     sprytile_utils,
     sprytile_uv,
+    sprytile_tilefolder,
     tool_build,
     tool_paint,
     tool_fill,

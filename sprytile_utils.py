@@ -84,7 +84,7 @@ def grid_is_single_pixel(grid):
 
 
 def grid_no_spacing(grid):
-    no_spacing = grid.padding[0] == 0 and grid.padding[0] == 0 and \
+    no_spacing = grid.padding[0] == 0 and grid.padding[1] == 0 and \
                  grid.margin[0] == 0 and grid.margin[1] == 0 and \
                  grid.margin[2] == 0 and grid.margin[3] == 0
     return no_spacing
@@ -96,7 +96,8 @@ def get_grid_ids(context, grid, select_coords):
     if target_img is None:
         return None
 
-    row_size = math.ceil(target_img.size[0] / grid.grid[0])
+    cell_w = grid.grid[0] + grid.padding[0] * 2 + grid.margin[1] + grid.margin[3]
+    row_size = math.ceil(target_img.size[0] / cell_w)
     grid_ids = []
     for x, y in select_coords:
         tile_id = (y * row_size) + x
@@ -1975,6 +1976,7 @@ class VIEW3D_PT_SprytileObjectPanel(bpy.types.Panel):
         if selection_enabled:
             box.operator("sprytile.tileset_load")
             box.operator("sprytile.tileset_new")
+            box.operator("sprytile.tile_folder_link", icon='FILE_FOLDER')
         else:
             box.label(text="Select a mesh object to use Sprytile")
 

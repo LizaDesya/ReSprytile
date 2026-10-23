@@ -1,5 +1,5 @@
 import bpy
-from . import sprytile_utils
+from . import sprytile_utils, sprytile_tilefolder
 from bpy.types import Panel, UIList
 
 
@@ -127,6 +127,7 @@ class VIEW3D_MT_SprytileGridDropDown(bpy.types.Menu):
     def draw(self, context):
         layout = self.layout
         layout.operator("sprytile.tileset_new", icon="PRESET_NEW")
+        layout.operator("sprytile.tile_folder_link", icon="FILE_FOLDER")
         layout.separator()
         layout.operator("sprytile.validate_grids", icon="GRID")
 
@@ -238,6 +239,7 @@ class VIEW3D_PT_SprytilePanel(bpy.types.Panel):
         if selected_grid is None:
             return
 
+        sprytile_tilefolder.draw_tile_folder_info(layout, context)
         layout.prop(selected_grid, "grid", text="Grid Size")
 
         row = layout.row()
